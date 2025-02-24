@@ -53,6 +53,7 @@ class VisionSolution:
             x += 0.5
         self.test_cloud = test_cloud
 
+        # 地图的点云，单位为m
         map_cloud = []
         x = -1.5
         while x < 1.5:
@@ -65,14 +66,23 @@ class VisionSolution:
             x += 0.01
         self.map_cloud = map_cloud
 
-    def projectMethod(self, camera_img):
+    def buildPreDistanceMap(self, camera_img):
+        """
+        将三维点云通过相机内外参的立体视觉计算映射到相机屏幕上，建立预映射图
+
+        输入：
+            camera_img: 相机图像
+        输出：
+            points_2d: 映射到屏幕的点云
+            pre_distance_map: 预映射图
+        """
         test_cloud = np.array(self.test_cloud, dtype=np.float32)
         map_cloud = np.array(self.map_cloud, dtype=np.float32)
 
         camera_position = np.array([self.camera_x, self.camera_y, self.camera_z], dtype=np.float32)
         camera_euler_angles = np.array([radians(self.pitch), radians(0), radians(0)], dtype=np.float32)
         img = np.zeros((self.SCREEN_H, self.SCREEN_W, 3), dtype=np.uint8)
-        img_3d = camera_img.copy()
+        pre_distance_map = camera_img.copy()
 
         # 内参
         # K = np.array([[669.83598624, 0, 642.06902362],
@@ -109,15 +119,21 @@ class VisionSolution:
 
         map_2d = np.array(map_2d, dtype=np.int32)
 
+        # 遍历映射到屏幕的点云map_2d，每隔4个点取一个点，是一个包围的单位距离线条区域，同时取对应三维点云map_cloud的距离，写为色值，这种方法成为建立预映射图
         for i in range(len(map_2d))[::4]:
             temp_points = [map_2d[i + j][0] for j in range(4)]
+
+            # 转换为从起跳线（点云坐标系下的-1.5m）开始的距离，单位从米转为厘米
             distance = 300 - (map_cloud[i][0] * 100 + 150)
+
+            # 将距离写到图像中每个像素的颜色的色值中
             if distance > 255:
                 color = [255, distance - 255, 0]
             else:
                 color = [distance, 0, 0]
             # print(color)
-            img_3d = cv2.fillConvexPoly(img_3d, np.array(temp_points), color)
+            # 将该包围的单位距离线条区域填充为包含该距离的色值
+            pre_distance_map = cv2.fillConvexPoly(pre_distance_map, np.array(temp_points), color)
         # for p in points_2d:
         #     x, y = p[0]
         #     # cv2.circle(img, p[0], 5, (0, 255, 0), -1)
@@ -129,9 +145,19 @@ class VisionSolution:
         # cv2.imshow('test', img)
         # cv2.waitKey(0)
         # cv2.destroyAllWindows()
-        return points_2d, img_3d
+        return points_2d, pre_distance_map
 
-    def get_distance_seg(self, model: YOLO, img_3d: np.ndarray, src_img: np.ndarray):
+    def get_distance_seg(self, model: YOLO, pre_distance_map: np.ndarray, src_img: np.ndarray):
+        """
+        从segment图像求得脚后跟图像坐标点，求得在预映射图中的距离
+
+        输入：
+            model: YOLO模型
+            pre_distance_map: 3D图像
+            src_img: 源图像
+        输出：
+            distance: 距离，单位为m
+        """
         result = model(src_img)
         # print(src_img)
         np_mask = result[0].masks[0].cpu().data.numpy() * 255
@@ -161,7 +187,7 @@ class VisionSolution:
                                 y = index - (cut_bound - 1 - s)
                                 # print(s, img_mask.shape, T_cut_mask.shape)
 
-                                color = img_3d[y][x]
+                                color = pre_distance_map[y][x]
                                 # print(color)
                                 distance = (color[0] + color[1]) / 100
                                 img_mask = cv2.cvtColor(img_mask, cv2.COLOR_GRAY2BGR)
@@ -194,6 +220,9 @@ class Lidar:
         self.cut_y_end = -1
 
     def readlidar2img(self):
+        """
+        读取2d激光雷达点云数据，转换为可视化图像
+        """
         last_angle = 0
         img = np.zeros((border_p, border_p), dtype=np.uint8)
 
@@ -300,6 +329,9 @@ def nothing(x):
 
 
 def com_lidar():
+    """
+    校准窗口滑块调整虚拟相机位置，使虚拟相机校准线 对齐 真实相机画面中现实跳远刻度线
+    """
     lidar = Lidar(com="COM43")
     lidar_thread = threading.Thread(target=lidar.readlidar2img, daemon=True)
 
@@ -333,7 +365,7 @@ def com_lidar():
         pitch = cv2.getTrackbarPos('p', 'camera')
         visionSolution.pitch = pitch
         print(camera_x, camera_y, camera_z, pitch, end='\r')
-        points_2d, img_3d = visionSolution.projectMethod(img)
+        points_2d, pre_distance_map = visionSolution.buildPreDistanceMap(img)
         show_img = img
         for p in points_2d:
             x, y = p[0]
@@ -342,7 +374,7 @@ def com_lidar():
                 # img[y][x] = (0, 255, 0)
             except:
                 pass
-        # show_img = np.vstack((show_img, img_3d))
+        # show_img = np.vstack((show_img, pre_distance_map))
         cv2.imshow('camera', show_img)
         cv2.imshow('stand', lidar.jump_img)
         cv2.imshow('land', lidar.out_img)
@@ -358,6 +390,9 @@ def com_lidar():
     cap.release()
 
 def main2():
+    """
+    主函数，完成一次跳远的流程控制
+    """
     lidar = Lidar(com="COM4")
     lidar_thread = threading.Thread(target=lidar.readlidar2img, daemon=True)
 
@@ -381,16 +416,23 @@ def main2():
     cv2.namedWindow('stand', cv2.WINDOW_NORMAL)
     cv2.namedWindow('land', cv2.WINDOW_NORMAL)
     cv2.namedWindow('all_img', cv2.WINDOW_NORMAL)
-    cv2.namedWindow('img_3d', cv2.WINDOW_NORMAL)
+    cv2.namedWindow('pre_distance_map', cv2.WINDOW_NORMAL)
     cv2.createTrackbar('x', 'camera', init_x, 100, nothing)
     cv2.createTrackbar('y', 'camera', init_y, 100, nothing)
     cv2.createTrackbar('z', 'camera', init_z, 100, nothing)
     cv2.createTrackbar('p', 'camera', init_p, 90, nothing)
 
-    is_land = False
-    is_jump = False
-    is_stand = False
+    # 是否开始录制跳远（进入识别状态）
     is_start = False
+
+    # 是否检测到落点
+    is_land = False
+
+    # 是否检测到起跳
+    is_jump = False
+
+    # 检测起点是否有人
+    is_stand = False
 
     while True:
         _, img = cap.read()
@@ -405,8 +447,10 @@ def main2():
         visionSolution.pitch = pitch
         # print(visionSolution.camera_x, visionSolution.camera_y, visionSolution.camera_z, visionSolution.pitch, end='\r')
         print(camera_x, camera_y, camera_z, pitch, end='\r')
-        points_2d, img_3d = visionSolution.projectMethod(img)
+        points_2d, pre_distance_map = visionSolution.buildPreDistanceMap(img)
         show_img = img
+
+        # 把刻度线点云画在图像上
         for p in points_2d:
             x, y = p[0]
             try:
@@ -414,8 +458,8 @@ def main2():
                 # img[y][x] = (0, 255, 0)
             except:
                 pass
-        # show_img = np.vstack((show_img, img_3d))
-        cv2.imshow('img_3d', img_3d)
+        # show_img = np.vstack((show_img, pre_distance_map))
+        cv2.imshow('pre_distance_map', pre_distance_map)
         cv2.imshow('camera', show_img)
         cv2.imshow('stand', lidar.jump_img)
         cv2.imshow('land', lidar.out_img)
@@ -444,6 +488,8 @@ def main2():
             cv2.destroyAllWindows()
             break
 
+        # 这里流程复杂，需要补流程图 
+
         if tick == lidar.tick:
             continue
 
@@ -452,11 +498,11 @@ def main2():
         if is_land:
             continue
 
-        # 检测到有落点
+        # 检测到有落点，获取距离，完成一次跳远流程
         if lidar.out_img.any():
             time.sleep(0.2)
             _, tick_img = cap.read()
-            print(f'distance: {visionSolution.get_distance_seg(model, img_3d, tick_img)}')
+            print(f'distance: {visionSolution.get_distance_seg(model, pre_distance_map, tick_img)}')
 
             rq = time.strftime('%Y-%m-%d %H_%M_%S', time.localtime(time.time()))
             print(f'land! {rq}')
@@ -472,6 +518,7 @@ def main2():
 
         is_stand = True
 
+        # 起跳区没有雷达点云检出，则认为起跳
         if not lidar.jump_img.any():
 
             # _, tick_img = cap.read()
@@ -505,7 +552,7 @@ def main():
 
     while True:
         _, img = cap.read()
-        points_2d, img_3d = visionSolution.projectMethod(img)
+        points_2d, pre_distance_map = visionSolution.buildPreDistanceMap(img)
         for p in points_2d:
             x, y = p[0]
             try:
