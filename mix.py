@@ -10,13 +10,16 @@ from math import sin, cos, radians
 # 截取的边长转换成和像素边长的比例关系，5m = 1000pixel
 border_m = 5
 border_p = 1000
+
+# 虚拟相机初始位置
 init_x = 46
 init_y = 68
 init_z = 39
 init_p = 48
 
+
 cut_bound = 100
-CAMERA_INDEX = 1
+CAMERA_INDEX = 0
 
 
 def imgSplit():
@@ -124,7 +127,7 @@ class VisionSolution:
             temp_points = [map_2d[i + j][0] for j in range(4)]
 
             # 转换为从起跳线（点云坐标系下的-1.5m）开始的距离，单位从米转为厘米
-            distance = 300 - (map_cloud[i][0] * 100 + 150)
+            distance = int(300 - (map_cloud[i][0] * 100 + 150))
 
             # 将距离写到图像中每个像素的颜色的色值中
             if distance > 255:
@@ -171,6 +174,8 @@ class VisionSolution:
         x, y = 0, 0
         img_y_len = len(img_mask)
 
+        # 遍历出脚后跟图像坐标点，从下往上遍历，找到第一个有像素的点，然后向上遍历，找到第一个有像素的点，
+        # 然后将该点的颜色值取出，转换为距离，返回
         for i in range(img_y_len):
             index = len(img_mask) - 1 - i
             if img_mask[index].any():
@@ -328,15 +333,16 @@ def nothing(x):
     pass
 
 
-def com_lidar():
+def com_lidar(use_lidar: bool):
     """
     校准窗口滑块调整虚拟相机位置，使虚拟相机校准线 对齐 真实相机画面中现实跳远刻度线
     """
-    lidar = Lidar(com="COM43")
-    lidar_thread = threading.Thread(target=lidar.readlidar2img, daemon=True)
+    if use_lidar:
+        lidar = Lidar(com="COM43")
+        lidar_thread = threading.Thread(target=lidar.readlidar2img, daemon=True)
 
-    lidar_thread.start()
-    print('lidar started')
+        lidar_thread.start()
+        print('lidar started')
 
     cap = cv2.VideoCapture(CAMERA_INDEX)
     visionSolution = VisionSolution()
@@ -344,9 +350,11 @@ def com_lidar():
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, visionSolution.SCREEN_H)
 
     cv2.namedWindow('camera', cv2.WINDOW_NORMAL)
-    cv2.namedWindow('stand', cv2.WINDOW_NORMAL)
-    cv2.namedWindow('land', cv2.WINDOW_NORMAL)
-    cv2.namedWindow('all_img', cv2.WINDOW_NORMAL)
+
+    if use_lidar:
+        cv2.namedWindow('stand', cv2.WINDOW_NORMAL)
+        cv2.namedWindow('land', cv2.WINDOW_NORMAL)
+        cv2.namedWindow('all_img', cv2.WINDOW_NORMAL)
     cv2.createTrackbar('x', 'camera', 53, 100, nothing)
     cv2.createTrackbar('y', 'camera', 49, 100, nothing)
     cv2.createTrackbar('z', 'camera', 13, 100, nothing)
@@ -364,7 +372,8 @@ def com_lidar():
         visionSolution.camera_z = - 1 + (camera_z - 50) / 100
         pitch = cv2.getTrackbarPos('p', 'camera')
         visionSolution.pitch = pitch
-        print(camera_x, camera_y, camera_z, pitch, end='\r')
+        
+        print(camera_x, camera_y, camera_z, pitch)
         points_2d, pre_distance_map = visionSolution.buildPreDistanceMap(img)
         show_img = img
         for p in points_2d:
@@ -376,12 +385,13 @@ def com_lidar():
                 pass
         # show_img = np.vstack((show_img, pre_distance_map))
         cv2.imshow('camera', show_img)
-        cv2.imshow('stand', lidar.jump_img)
-        cv2.imshow('land', lidar.out_img)
-        try:
-            cv2.imshow('all_img', lidar.all_img)
-        except:
-            pass
+        if use_lidar:
+            cv2.imshow('stand', lidar.jump_img)
+            cv2.imshow('land', lidar.out_img)
+            try:
+                cv2.imshow('all_img', lidar.all_img)
+            except:
+                pass
 
         if cv2.waitKey(1) == ord('b'):
             cv2.destroyAllWindows()
@@ -606,6 +616,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main2()
-    # com_lidar()
+    # main2()
+    com_lidar(use_lidar=False)
     # imgSplit()
