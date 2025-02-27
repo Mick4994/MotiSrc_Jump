@@ -22,19 +22,6 @@ cut_bound = 100
 CAMERA_INDEX = 0
 
 
-def imgSplit():
-    yellow_hsv_min = np.array([14, 43, 46], dtype=np.uint8)
-    yellow_hsv_max = np.array([20, 255, 255], dtype=np.uint8)
-    img = cv2.imread('lands_img/1.png')
-    hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    inrange_img = cv2.inRange(hsv_img, yellow_hsv_min, yellow_hsv_max)
-    inrange_img = cv2.cvtColor(inrange_img, cv2.COLOR_GRAY2BGR)
-    merge = np.hstack((img, inrange_img))
-    cv2.imshow('test', merge)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-
-
 class VisionSolution:
     def __init__(self) -> None:
         # self.SCREEN_W = 1280
@@ -95,14 +82,17 @@ class VisionSolution:
         #               [0, 670.68343126, 362.61330926],
         #               [0, 0, 1]], dtype=np.float32)
         # K = np.array([[670, 0, 640],
-        #             [0, 670, 360],
-        #             [0,   0,   1]], dtype=np.float32)
+        #               [0, 670, 360],
+        #               [0,   0,   1]], dtype=np.float32)
         # K = np.array([[1.67634347e+03, 0.00000000e+00, 9.49802868e+02],
         #               [0.00000000e+00, 1.67448209e+03, 5.38285316e+02],
         #               [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]], dtype=np.float32)
+
+        # RMX3700 GT Neo 5 SE 内参
         K = np.array([[1.49217024e+03, 0.00000000e+00, 9.55260745e+02],
-                         [0.00000000e+00, 1.49520977e+03, 5.39343430e+02],
-                         [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]], dtype=np.float32)
+                      [0.00000000e+00, 1.49520977e+03, 5.39343430e+02],
+                      [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]], dtype=np.float32)
+        
         # 计算被旋转后的平移向量
         R, _ = cv2.Rodrigues(camera_euler_angles)
 
@@ -137,17 +127,7 @@ class VisionSolution:
             # print(color)
             # 将该包围的单位距离线条区域填充为包含该距离的色值
             pre_distance_map = cv2.fillConvexPoly(pre_distance_map, np.array(temp_points), color)
-        # for p in points_2d:
-        #     x, y = p[0]
-        #     # cv2.circle(img, p[0], 5, (0, 255, 0), -1)
-        #     try:
-        #         img[y][x] = (0, 255, 0)
-        #     except:
-        #         pass
-        #
-        # cv2.imshow('test', img)
-        # cv2.waitKey(0)
-        # cv2.destroyAllWindows()
+
         return points_2d, pre_distance_map
 
     def get_distance_seg(self, model: YOLO, pre_distance_map: np.ndarray, src_img: np.ndarray):
@@ -333,7 +313,7 @@ def nothing(x):
     pass
 
 
-def com_lidar(use_lidar: bool):
+def com_lidar(use_lidar: bool = True, debug: bool = False):
     """
     校准窗口滑块调整虚拟相机位置，使虚拟相机校准线 对齐 真实相机画面中现实跳远刻度线
     """
@@ -344,10 +324,14 @@ def com_lidar(use_lidar: bool):
         lidar_thread.start()
         print('lidar started')
 
-    cap = cv2.VideoCapture(CAMERA_INDEX)
     visionSolution = VisionSolution()
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, visionSolution.SCREEN_W)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, visionSolution.SCREEN_H)
+
+    if debug:
+        src = cv2.imread('lands/land_cam_2024-01-05 17_36_33.jpg')
+    else:
+        cap = cv2.VideoCapture(CAMERA_INDEX)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, visionSolution.SCREEN_W)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, visionSolution.SCREEN_H)
 
     cv2.namedWindow('camera', cv2.WINDOW_NORMAL)
 
@@ -361,7 +345,10 @@ def com_lidar(use_lidar: bool):
     cv2.createTrackbar('p', 'camera', 43, 90, nothing)
 
     while True:
-        _, img = cap.read()
+        if debug:
+            img = src.copy()
+        else:
+            _, img = cap.read()
 
         camera_x = cv2.getTrackbarPos('x', 'camera')
         visionSolution.camera_x = (camera_x - 50) / 100
@@ -373,7 +360,7 @@ def com_lidar(use_lidar: bool):
         pitch = cv2.getTrackbarPos('p', 'camera')
         visionSolution.pitch = pitch
         
-        print(camera_x, camera_y, camera_z, pitch)
+        # print(camera_x, camera_y, camera_z, pitch)
         points_2d, pre_distance_map = visionSolution.buildPreDistanceMap(img)
         show_img = img
         for p in points_2d:
@@ -397,9 +384,10 @@ def com_lidar(use_lidar: bool):
             cv2.destroyAllWindows()
             break
 
-    cap.release()
+    if not debug:
+        cap.release()
 
-def main2():
+def main2(debug=False):
     """
     主函数，完成一次跳远的流程控制
     """
@@ -413,14 +401,18 @@ def main2():
     model = YOLO('yolov8n-seg.pt')
     print('yolo_seg loaded')
 
-    cap = cv2.VideoCapture(CAMERA_INDEX)
     visionSolution = VisionSolution()
     # fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
     rq = time.strftime('%Y-%m-%d %H_%M_%S', time.localtime(time.time()))
 
     # out = cv2.VideoWriter(f'out_{rq}.mp4', fourcc, 15, (visionSolution.SCREEN_W, visionSolution.SCREEN_H))
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, visionSolution.SCREEN_W)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, visionSolution.SCREEN_H)
+
+    if debug:
+        src = cv2.imread('lands/land_cam_2024-01-05 17_36_33.jpg')
+    else:
+        cap = cv2.VideoCapture(CAMERA_INDEX)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, visionSolution.SCREEN_W)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, visionSolution.SCREEN_H)
 
     cv2.namedWindow('camera', cv2.WINDOW_NORMAL)
     cv2.namedWindow('stand', cv2.WINDOW_NORMAL)
@@ -445,7 +437,10 @@ def main2():
     is_stand = False
 
     while True:
-        _, img = cap.read()
+        if debug:
+            img = src.copy()
+        else:
+            _, img = cap.read()
         camera_x = cv2.getTrackbarPos('x', 'camera')
         visionSolution.camera_x = (camera_x - 50) / 100
         camera_y = cv2.getTrackbarPos('y', 'camera')
@@ -541,81 +536,8 @@ def main2():
     # out.release()
 
 
-def main():
-    # lidar = Lidar(com="COM43", file="ldata/ldata5.txt")
-    lidar = Lidar(com="COM4")
-    lidar_thread = threading.Thread(target=lidar.readlidar2img, daemon=True)
-
-    # time.sleep(2)
-    lidar_thread.start()
-
-    tick = lidar.tick
-
-    visionSolution = VisionSolution()
-    cap = cv2.VideoCapture(CAMERA_INDEX)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, visionSolution.SCREEN_W)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, visionSolution.SCREEN_H)
-
-    is_land = False
-    is_jump = False
-    is_stand = False
-
-    while True:
-        _, img = cap.read()
-        points_2d, pre_distance_map = visionSolution.buildPreDistanceMap(img)
-        for p in points_2d:
-            x, y = p[0]
-            try:
-                cv2.circle(img, p[0], 1, (0, 255, 0), -1)
-                # img[y][x] = (0, 255, 0)
-            except:
-                pass
-
-        if len(lidar.merge_img) > 0:
-            show_img = np.vstack((img, lidar.merge_img))
-            show_img = cv2.resize(show_img, (800, 900))
-        else:
-            show_img = img
-        cv2.imshow('camera', show_img)
-        if cv2.waitKey(1) == ord('b'):
-            cv2.destroyAllWindows()
-            break
-        # if not lidar_thread.is_alive():
-        #     break
-
-        if tick == lidar.tick:
-            continue
-
-        tick = lidar.tick
-
-        if is_land:
-            continue
-
-        # 检测到有落点
-        if lidar.out_img.any():
-            rq = time.strftime('%Y-%m-%d %H_%M_%S', time.localtime(time.time()))
-            print(f'land! {rq}')
-            cv2.imwrite(f'lands/land_lidar_{rq}.jpg', lidar.out_img)
-            # cv2.imwrite(f'lands/land_cam_{rq}.jpg', img)
-            is_land = True
-
-        if is_jump:
-            continue
-
-        if not lidar.jump_img.any() and not is_stand:
-            continue
-
-        is_stand = True
-
-        if not lidar.jump_img.any():
-            rq = time.strftime('%Y-%m-%d %H_%M_%S', time.localtime(time.time()))
-            print(f'jump! {rq}')
-            cv2.imwrite(f'lands/land_lidar_{rq}.jpg', lidar.jump_img)
-            # cv2.imwrite(f'lands/land_cam_{rq}.jpg', img)
-            is_jump = True
-
-
 if __name__ == "__main__":
     # main2()
-    com_lidar(use_lidar=False)
-    # imgSplit()
+    # main2(debug=True)
+    com_lidar(use_lidar=False, debug=True)
+
