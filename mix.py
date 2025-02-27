@@ -1,26 +1,28 @@
-import serial
-import threading
-import time
-import numpy as np
 import cv2
+import time
+import toml
+import serial
 import traceback
+import threading
+import numpy as np
 from ultralytics import YOLO
 from math import sin, cos, radians
 
-# 截取的边长转换成和像素边长的比例关系，5m = 1000pixel
-border_m = 5
-border_p = 1000
+# 读取 TOML 配置文件
+with open('config.toml', 'r', encoding='utf-8') as f:
+    config = toml.load(f)
 
-# 虚拟相机初始位置
-init_x = 46
-init_y = 68
-init_z = 39
-init_p = 48
+# 从配置中获取参数
+border_m = config['border_m']
+border_p = config['border_p']
+init_x = config['init_x']
+init_y = config['init_y']
+init_z = config['init_z']
+init_p = config['init_p']
+cut_bound = config['cut_bound']
+CAMERA_INDEX = config['CAMERA_INDEX']
 
-
-cut_bound = 100
-CAMERA_INDEX = 0
-
+camera_K = np.array(config['camera_K']['RMX3700_K'], dtype=np.float32)
 
 class VisionSolution:
     def __init__(self) -> None:
@@ -73,25 +75,6 @@ class VisionSolution:
         camera_euler_angles = np.array([radians(self.pitch), radians(0), radians(0)], dtype=np.float32)
         img = np.zeros((self.SCREEN_H, self.SCREEN_W, 3), dtype=np.uint8)
         pre_distance_map = camera_img.copy()
-
-        # 内参
-        # K = np.array([[669.83598624, 0, 642.06902362],
-        #               [0, 669.94827046, 363.98259922],
-        #               [0,  0, 1]], dtype=np.float32)
-        # K = np.array([[671.15035972, 0, 638.50053821],
-        #               [0, 670.68343126, 362.61330926],
-        #               [0, 0, 1]], dtype=np.float32)
-        # K = np.array([[670, 0, 640],
-        #               [0, 670, 360],
-        #               [0,   0,   1]], dtype=np.float32)
-        # K = np.array([[1.67634347e+03, 0.00000000e+00, 9.49802868e+02],
-        #               [0.00000000e+00, 1.67448209e+03, 5.38285316e+02],
-        #               [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]], dtype=np.float32)
-
-        # RMX3700 GT Neo 5 SE 内参
-        K = np.array([[1.49217024e+03, 0.00000000e+00, 9.55260745e+02],
-                      [0.00000000e+00, 1.49520977e+03, 5.39343430e+02],
-                      [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]], dtype=np.float32)
         
         # 计算被旋转后的平移向量
         R, _ = cv2.Rodrigues(camera_euler_angles)
@@ -101,11 +84,11 @@ class VisionSolution:
         tvec = R @ camera_position
 
         points_2d, _ = cv2.projectPoints(
-            test_cloud, camera_euler_angles, tvec, K, None
+            test_cloud, camera_euler_angles, tvec, camera_K, None
         )
 
         map_2d, _ = cv2.projectPoints(
-            map_cloud, camera_euler_angles, tvec, K, None
+            map_cloud, camera_euler_angles, tvec, camera_K, None
         )
 
         points_2d = np.array(points_2d, dtype=np.int32)
@@ -124,7 +107,7 @@ class VisionSolution:
                 color = [255, distance - 255, 0]
             else:
                 color = [distance, 0, 0]
-            # print(color)
+
             # 将该包围的单位距离线条区域填充为包含该距离的色值
             pre_distance_map = cv2.fillConvexPoly(pre_distance_map, np.array(temp_points), color)
 
@@ -309,10 +292,6 @@ class Lidar:
                     self.ser.read(155)
 
 
-def nothing(x):
-    pass
-
-
 def com_lidar(use_lidar: bool = True, debug: bool = False):
     """
     校准窗口滑块调整虚拟相机位置，使虚拟相机校准线 对齐 真实相机画面中现实跳远刻度线
@@ -339,10 +318,10 @@ def com_lidar(use_lidar: bool = True, debug: bool = False):
         cv2.namedWindow('stand', cv2.WINDOW_NORMAL)
         cv2.namedWindow('land', cv2.WINDOW_NORMAL)
         cv2.namedWindow('all_img', cv2.WINDOW_NORMAL)
-    cv2.createTrackbar('x', 'camera', 53, 100, nothing)
-    cv2.createTrackbar('y', 'camera', 49, 100, nothing)
-    cv2.createTrackbar('z', 'camera', 13, 100, nothing)
-    cv2.createTrackbar('p', 'camera', 43, 90, nothing)
+    cv2.createTrackbar('x', 'camera', 53, 100, lambda x: None)
+    cv2.createTrackbar('y', 'camera', 49, 100, lambda x: None)
+    cv2.createTrackbar('z', 'camera', 13, 100, lambda x: None)
+    cv2.createTrackbar('p', 'camera', 43, 90, lambda x: None)
 
     while True:
         if debug:
@@ -419,10 +398,10 @@ def main2(debug=False):
     cv2.namedWindow('land', cv2.WINDOW_NORMAL)
     cv2.namedWindow('all_img', cv2.WINDOW_NORMAL)
     cv2.namedWindow('pre_distance_map', cv2.WINDOW_NORMAL)
-    cv2.createTrackbar('x', 'camera', init_x, 100, nothing)
-    cv2.createTrackbar('y', 'camera', init_y, 100, nothing)
-    cv2.createTrackbar('z', 'camera', init_z, 100, nothing)
-    cv2.createTrackbar('p', 'camera', init_p, 90, nothing)
+    cv2.createTrackbar('x', 'camera', init_x, 100, lambda x: None)
+    cv2.createTrackbar('y', 'camera', init_y, 100, lambda x: None)
+    cv2.createTrackbar('z', 'camera', init_z, 100, lambda x: None)
+    cv2.createTrackbar('p', 'camera', init_p, 90, lambda x: None)
 
     # 是否开始录制跳远（进入识别状态）
     is_start = False
