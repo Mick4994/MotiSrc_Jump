@@ -398,7 +398,7 @@ def main2(debug=False):
     tick = lidar.tick
     print('lidar started')
 
-    model = YOLO('yolov8n-seg.pt')
+    model = YOLO('utils/yolov8n-seg.pt')
     print('yolo_seg loaded')
 
     visionSolution = VisionSolution()
