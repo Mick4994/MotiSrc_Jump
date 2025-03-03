@@ -4,3 +4,4 @@
 /.idea/
 /chess_img/
 /venv/
+__pycache__/

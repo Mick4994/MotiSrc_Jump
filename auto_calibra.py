@@ -1,5 +1,8 @@
 import cv2
+import time
+import math
 import numpy as np
+from mix import VisionSolution
 
 
 yellow_hsv_min = np.array([9, 43, 43], dtype=np.uint8)
@@ -51,7 +54,7 @@ def on_mouse_move(event, x, y, flags, param):
     cv2.imshow('test', marked_img)
 
 
-def imgSplit():
+def getTopKLine(top_k = 3, debug = False):
 
     img = cv2.imread('lands/land_cam_2024-01-05 17_36_33.jpg')
     print(img.shape)
@@ -125,14 +128,19 @@ def imgSplit():
 
     sorted_lines = sorted(lines, key=lambda x: x[1], reverse=True)
 
-    top_k = 3
+    # for line in sorted_lines[:top_k]:
+    #     cv2.line(inrange_img_rgb, line[0][0], line[0][1], (0, 0, 255), 2)
 
-    for line in sorted_lines[:top_k]:
-        cv2.line(inrange_img_rgb, line[0][0], line[0][1], (0, 0, 255), 2)
+    sorted_lines = sorted_lines[:top_k]
+    sorted_lines = [sorted(each[0], key=lambda x: x[1], reverse=True) for each in sorted_lines]
+    sorted_lines = sorted(sorted_lines, key=lambda x: x[0][0])
+    print(sorted_lines)
+    
+    if not debug:
+        return sorted_lines
 
     merge = np.vstack((img, inrange_img_rgb))
     cv2.namedWindow('test', cv2.WINDOW_NORMAL)
-
     # 先创建param字典
     param = {
         'img': img,
@@ -140,7 +148,6 @@ def imgSplit():
         'processed_img': inrange_img_rgb,
         'img_height': img.shape[0]
     }
-
     # 添加缩放参数初始化
     param.update({
         'original_merge': merge.copy(),
@@ -151,14 +158,149 @@ def imgSplit():
     cv2.namedWindow('Zoom', cv2.WINDOW_NORMAL)
     cv2.imshow('Zoom', np.zeros((200,200,3), np.uint8))
     
-    cv2.imshow('test', merge)
-    
     # 设置鼠标回调参数
     cv2.setMouseCallback('test', on_mouse_move, param)
     
+    for line in sorted_lines[:top_k]:
+        # cv2.line(inrange_img_rgb, line[0][0], line[0][1], (0, 0, 255), 2)
+        for i in range(2):
+            inrange_img_rgb = cv2.circle(inrange_img_rgb, line[0][i], 10, (0, 0, 255), -1)
+            merge = np.vstack((img, inrange_img_rgb))
+            cv2.imshow('test', merge)
+            cv2.waitKey(2000)
+
+    cv2.destroyAllWindows()
+
+
+def loss_func(topk_lines, p2ds, debug = False, board_size = (1920, 1080)):
+    """
+    校准距离计算的损失评估函数
+
+    Args:
+        topk_lines: 真实相机通过图像处理得到最长的k条校准线
+        p2ds: 虚拟相机通过立体视觉得到的2d点校准线
+        debug: 是否开启debug模式
+        pitch: 虚拟相机的俯仰角
+        camera_x: 虚拟相机的x轴偏移
+        camera_y: 虚拟相机的y轴偏移
+        camera_z: 虚拟相机的z轴偏移
+
+    Returns:
+        损失评估函数值
+    """
+
+    # 反转+裁剪
+    p2ds = p2ds[::-1]
+    p2ds = p2ds[400: 400+200*3]
+
+    if not debug:
+        total_distance = 0
+        mid_distance = 0
+        
+        p2d_list = []
+
+        for i in range(3):
+            p2d1:np.ndarray = p2ds[i*200][0]
+            p2d2:np.ndarray = p2ds[i*200+199][0]
+            p2d_list.append([p2d1.tolist(), p2d2.tolist()])
+
+            # y = kx + b
+            p2d_line_k = (p2d2[1] - p2d1[1]) / (p2d2[0] - p2d1[0])
+            p2d_line_b = p2d1[1] - p2d_line_k * p2d1[0]
+
+            tkp1 = topk_lines[i][0]
+            tkp2 = topk_lines[i][1]
+            
+            div = tkp2[0] - tkp1[0]
+            if tkp1[1] - tkp2[1] == 0:
+                div = 0.1
+            tkp_line_k = (tkp2[1] - tkp1[1]) / div
+
+            max_k = max(p2d_line_k, tkp_line_k)
+            min_k = min(p2d_line_k, tkp_line_k)
+
+            k_rate = max_k / min_k
+
+            mid_tkp = ((tkp1[0] + tkp2[0]) // 2, (tkp1[1] + tkp2[1]) // 2)
+            # d = |kx - y + b| / √ (k² + 1)
+            p2line_distance = abs(p2d_line_k * mid_tkp[0] - mid_tkp[1] + p2d_line_b) / np.sqrt(p2d_line_k**2 + 1)
+            total_distance += p2line_distance + k_rate
+        print(f'total distance: {total_distance:.2f}')
+        return total_distance
+
+    bg = np.zeros(
+        (board_size[1], board_size[0], 3), 
+        dtype=np.uint8
+    )
+
+    for i in range(3):
+        
+        p2d1 = p2ds[i*200][0]
+        p2d2 = p2ds[i*200+199][0]
+
+        cv2.line(bg, (int(p2d1[0]), int(p2d1[1])), (int(p2d2[0]), int(p2d2[1])), (0, 0, 255), 2)
+
+    for line in topk_lines:
+        cv2.line(bg, line[0], line[1], (0, 255, 0), 2)
+    
+    cv2.namedWindow('test', cv2.WINDOW_NORMAL)
+    cv2.imshow('test', bg)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
 
+def calibrate():
+    img = cv2.imread('lands/land_cam_2024-01-05 17_36_33.jpg')
+    topk_lines = getTopKLine(debug=False)
+
+    visionSolution = VisionSolution()
+
+    # visionSolution.pitch = 48
+    # visionSolution.camera_x = (46 - 50) / 100
+
+    # # 理想高度1.5米
+    # visionSolution.camera_y = - 1.5 + (69 - 50) / 100
+
+    # # 理想距离1米
+    # visionSolution.camera_z = - 1 + (45 - 50) / 100
+
+    pitch_range = [48, 49]
+    camera_x_range = [45, 55]
+    camera_y_range = [35, 65]
+    camera_z_range = [45, 55]
+
+    pose_list = []
+
+    for pitch in range(pitch_range[0], pitch_range[1]):
+        for camera_x in range(camera_x_range[0], camera_x_range[1]):
+            for camera_y in range(camera_y_range[0], camera_y_range[1]):
+                for camera_z in range(camera_z_range[0], camera_z_range[1]):
+                    pose_list.append([pitch, camera_x, camera_y, camera_z])
+
+    loss_list = []
+
+    cnt = 0
+    for pitch, camera_x, camera_y, camera_z in pose_list:
+        cnt += 1
+        visionSolution.pitch = pitch
+        visionSolution.camera_x = (camera_x - 50) / 100
+        visionSolution.camera_y = - 1.5 + (camera_y - 50) / 100
+        visionSolution.camera_z = - 1 + (camera_z - 50) / 100
+
+        # p2ds: 虚拟相机通过立体视觉得到的2d点校准线
+        p2ds, _ = visionSolution.buildPreDistanceMap(camera_img=img)
+        
+        loss = loss_func(topk_lines, p2ds, debug=False)
+        print(f'cnt: {cnt}, loss: {loss}')
+        if math.isnan(loss):
+            continue
+
+        loss_list.append([[loss, pitch, camera_x, camera_y, camera_z], loss])
+
+    min_loss = min(loss_list, key=lambda x: x[1])
+    print(min_loss)
+
+
 if __name__ == '__main__':
-    imgSplit()
+    # getTopKLine(debug=False)
+    calibrate()
