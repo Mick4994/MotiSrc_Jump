@@ -1,8 +1,16 @@
+import os
 import cv2
+import copy
 import time
+import tqdm
 import math
+import warnings
+import itertools
 import numpy as np
+import multiprocessing
+from typing import NamedTuple
 from mix import VisionSolution
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 
 yellow_hsv_min = np.array([9, 43, 43], dtype=np.uint8)
@@ -57,7 +65,6 @@ def on_mouse_move(event, x, y, flags, param):
 def getTopKLine(top_k = 3, debug = False):
 
     img = cv2.imread('lands/land_cam_2024-01-05 17_36_33.jpg')
-    print(img.shape)
 
     hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
@@ -134,7 +141,6 @@ def getTopKLine(top_k = 3, debug = False):
     sorted_lines = sorted_lines[:top_k]
     sorted_lines = [sorted(each[0], key=lambda x: x[1], reverse=True) for each in sorted_lines]
     sorted_lines = sorted(sorted_lines, key=lambda x: x[0][0])
-    print(sorted_lines)
     
     if not debug:
         return sorted_lines
@@ -199,11 +205,11 @@ def loss_func(topk_lines, p2ds, debug = False, board_size = (1920, 1080)):
         
         p2d_list = []
 
-        for i in range(3):
-            p2d1:np.ndarray = p2ds[i*200][0]
-            p2d2:np.ndarray = p2ds[i*200+199][0]
-            p2d_list.append([p2d1.tolist(), p2d2.tolist()])
-
+        with np.errstate(divide='ignore', invalid='ignore'):
+            for i in range(3):
+                p2d1:np.ndarray = p2ds[i*200][0]
+                p2d2:np.ndarray = p2ds[i*200+199][0]
+                p2d_list.append([p2d1.tolist(), p2d2.tolist()])
             # y = kx + b
             p2d_line_k = (p2d2[1] - p2d1[1]) / (p2d2[0] - p2d1[0])
             p2d_line_b = p2d1[1] - p2d_line_k * p2d1[0]
@@ -223,9 +229,12 @@ def loss_func(topk_lines, p2ds, debug = False, board_size = (1920, 1080)):
 
             mid_tkp = ((tkp1[0] + tkp2[0]) // 2, (tkp1[1] + tkp2[1]) // 2)
             # d = |kx - y + b| / √ (k² + 1)
-            p2line_distance = abs(p2d_line_k * mid_tkp[0] - mid_tkp[1] + p2d_line_b) / np.sqrt(p2d_line_k**2 + 1)
+            # 使用numpy的安全除法避免警告
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                p2line_distance = abs(p2d_line_k * mid_tkp[0] - mid_tkp[1] + p2d_line_b) / np.sqrt(p2d_line_k**2 + 1)
+                
             total_distance += p2line_distance + k_rate
-        print(f'total distance: {total_distance:.2f}')
         return total_distance
 
     bg = np.zeros(
@@ -249,53 +258,93 @@ def loss_func(topk_lines, p2ds, debug = False, board_size = (1920, 1080)):
     cv2.destroyAllWindows()
 
 
+class CameraPose(NamedTuple):
+    pitch: int
+    camera_x: int
+    camera_y: int
+    camera_z: int
+    vision_solution: VisionSolution
+
+
+# 在模块顶部添加全局声明
+_global_img = None
+_global_topk_lines = None
+
+
+def init_worker(img, topk_lines):
+    """多进程初始化函数"""
+    global _global_img, _global_topk_lines
+    _global_img = img
+    _global_topk_lines = topk_lines
+
+
+def worker(camera_pose: CameraPose):
+    copy_visionSolution = camera_pose.vision_solution
+    copy_visionSolution.pitch = camera_pose.pitch
+    copy_visionSolution.camera_x = (camera_pose.camera_x - 50) / 100
+    copy_visionSolution.camera_y = - 1.5 + (camera_pose.camera_y - 50) / 100
+    copy_visionSolution.camera_z = - 1 + (camera_pose.camera_z - 50) / 100
+
+    p2ds, _ = copy_visionSolution.buildPreDistanceMap(camera_img=_global_img)
+    
+    loss = loss_func(_global_topk_lines, p2ds, debug=False)
+    if math.isnan(loss):
+        return None
+
+    return (camera_pose, loss)
+
+
 def calibrate():
+    start_time = time.time()
+
     img = cv2.imread('lands/land_cam_2024-01-05 17_36_33.jpg')
     topk_lines = getTopKLine(debug=False)
-
     visionSolution = VisionSolution()
 
-    # visionSolution.pitch = 48
-    # visionSolution.camera_x = (46 - 50) / 100
+    print(f'加载图片topk校准线和虚拟相机: {time.time() - start_time:.2f}s')
 
-    # # 理想高度1.5米
-    # visionSolution.camera_y = - 1.5 + (69 - 50) / 100
+    start_time = time.time()
 
-    # # 理想距离1米
-    # visionSolution.camera_z = - 1 + (45 - 50) / 100
+    # 使用numpy生成参数范围
+    pitch_range = np.arange(48, 49)
+    camera_x_range = np.arange(45, 55)
+    camera_y_range = np.arange(55, 75)
+    camera_z_range = np.arange(45, 55)
 
-    pitch_range = [48, 49]
-    camera_x_range = [45, 55]
-    camera_y_range = [35, 65]
-    camera_z_range = [45, 55]
+    # 计算总参数组合数
+    total_poses = (
+        len(pitch_range) * 
+        len(camera_x_range) * 
+        len(camera_y_range) * 
+        len(camera_z_range)
+    )
 
-    pose_list = []
+    # 使用itertools.product生成所有组合
+    camera_pose_list = (
+        CameraPose(pitch, camera_x, camera_y, camera_z, copy.deepcopy(visionSolution)) 
+        for pitch, camera_x, camera_y, camera_z in itertools.product(
+        pitch_range, camera_x_range, camera_y_range, camera_z_range)
+    )
 
-    for pitch in range(pitch_range[0], pitch_range[1]):
-        for camera_x in range(camera_x_range[0], camera_x_range[1]):
-            for camera_y in range(camera_y_range[0], camera_y_range[1]):
-                for camera_z in range(camera_z_range[0], camera_z_range[1]):
-                    pose_list.append([pitch, camera_x, camera_y, camera_z])
+    print(f'生成参数组合: {time.time() - start_time:.2f}s')
 
     loss_list = []
 
-    cnt = 0
-    for pitch, camera_x, camera_y, camera_z in pose_list:
-        cnt += 1
-        visionSolution.pitch = pitch
-        visionSolution.camera_x = (camera_x - 50) / 100
-        visionSolution.camera_y = - 1.5 + (camera_y - 50) / 100
-        visionSolution.camera_z = - 1 + (camera_z - 50) / 100
+    start_time = time.time()
 
-        # p2ds: 虚拟相机通过立体视觉得到的2d点校准线
-        p2ds, _ = visionSolution.buildPreDistanceMap(camera_img=img)
+    with multiprocessing.Pool(
+        processes=os.cpu_count(),
+        initializer=init_worker,
+        initargs=(img, topk_lines)
+    ) as pool:
+        print(f'多进程计算初始化: {time.time() - start_time:.2f}s')
+        results = pool.imap_unordered(worker, camera_pose_list, chunksize=10)
+        progress = tqdm.tqdm(results, total=total_poses)
         
-        loss = loss_func(topk_lines, p2ds, debug=False)
-        print(f'cnt: {cnt}, loss: {loss}')
-        if math.isnan(loss):
-            continue
-
-        loss_list.append([[loss, pitch, camera_x, camera_y, camera_z], loss])
+        loss_list = []
+        for result in progress:
+            if result is not None:
+                loss_list.append(result)
 
     min_loss = min(loss_list, key=lambda x: x[1])
     print(min_loss)
