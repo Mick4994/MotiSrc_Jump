@@ -62,7 +62,7 @@ def on_mouse_move(event, x, y, flags, param):
     cv2.imshow('test', marked_img)
 
 
-def getTopKLine(top_k = 3, debug = False):
+def getTopKLine(top_k = 3, debug = False, show_line=True):
 
     img = cv2.imread('lands/land_cam_2024-01-05 17_36_33.jpg')
 
@@ -145,40 +145,48 @@ def getTopKLine(top_k = 3, debug = False):
     if not debug:
         return sorted_lines
 
-    merge = np.vstack((img, inrange_img_rgb))
     cv2.namedWindow('test', cv2.WINDOW_NORMAL)
-    # 先创建param字典
-    param = {
-        'img': img,
-        'hsv_img': hsv_img,
-        'processed_img': inrange_img_rgb,
-        'img_height': img.shape[0]
-    }
-    # 添加缩放参数初始化
-    param.update({
-        'original_merge': merge.copy(),
-        'zoom_scale': 1.0
-    })
-    
-    # 创建缩放窗口
-    cv2.namedWindow('Zoom', cv2.WINDOW_NORMAL)
-    cv2.imshow('Zoom', np.zeros((200,200,3), np.uint8))
-    
-    # 设置鼠标回调参数
-    cv2.setMouseCallback('test', on_mouse_move, param)
+
+    if not show_line:
+        merge = np.vstack((img, inrange_img_rgb))
+        # 先创建param字典
+        param = {
+            'img': img,
+            'hsv_img': hsv_img,
+            'processed_img': inrange_img_rgb,
+            'img_height': img.shape[0]
+        }
+        # 添加缩放参数初始化
+        param.update({
+            'original_merge': merge.copy(),
+            'zoom_scale': 1.0
+        })
+        
+        # 创建缩放窗口
+        cv2.namedWindow('Zoom', cv2.WINDOW_NORMAL)
+        cv2.imshow('Zoom', np.zeros((200,200,3), np.uint8))
+        
+        # 设置鼠标回调参数
+        cv2.setMouseCallback('test', on_mouse_move, param)
     
     for line in sorted_lines[:top_k]:
-        # cv2.line(inrange_img_rgb, line[0][0], line[0][1], (0, 0, 255), 2)
-        for i in range(2):
-            inrange_img_rgb = cv2.circle(inrange_img_rgb, line[0][i], 10, (0, 0, 255), -1)
-            merge = np.vstack((img, inrange_img_rgb))
-            cv2.imshow('test', merge)
-            cv2.waitKey(2000)
+        if show_line:
+            img = cv2.line(img, line[0], line[1], (255, 0, 0), 2)
 
+        else:
+            for i in range(2):
+                inrange_img_rgb = cv2.circle(inrange_img_rgb, line[i], 10, (0, 0, 255), -1)
+                merge = np.vstack((img, inrange_img_rgb))
+                cv2.imshow('test', merge)
+                cv2.waitKey(2000)
+    if show_line:
+        cv2.imshow('test', img)
+
+    cv2.waitKey(0)
     cv2.destroyAllWindows()
 
 
-def loss_func(topk_lines, p2ds, debug = False, board_size = (1920, 1080)):
+def loss_func(topk_lines, p2ds, debug = False, printer = False, board_size = (1920, 1080)):
     """
     校准距离计算的损失评估函数
 
@@ -210,31 +218,35 @@ def loss_func(topk_lines, p2ds, debug = False, board_size = (1920, 1080)):
                 p2d1:np.ndarray = p2ds[i*200][0]
                 p2d2:np.ndarray = p2ds[i*200+199][0]
                 p2d_list.append([p2d1.tolist(), p2d2.tolist()])
-            # y = kx + b
-            p2d_line_k = (p2d2[1] - p2d1[1]) / (p2d2[0] - p2d1[0])
-            p2d_line_b = p2d1[1] - p2d_line_k * p2d1[0]
+                # y = kx + b
+                p2d_line_k = (p2d2[1] - p2d1[1]) / (p2d2[0] - p2d1[0])
+                p2d_line_b = p2d1[1] - p2d_line_k * p2d1[0]
 
-            tkp1 = topk_lines[i][0]
-            tkp2 = topk_lines[i][1]
-            
-            div = tkp2[0] - tkp1[0]
-            if tkp1[1] - tkp2[1] == 0:
-                div = 0.1
-            tkp_line_k = (tkp2[1] - tkp1[1]) / div
-
-            max_k = max(p2d_line_k, tkp_line_k)
-            min_k = min(p2d_line_k, tkp_line_k)
-
-            k_rate = max_k / min_k
-
-            mid_tkp = ((tkp1[0] + tkp2[0]) // 2, (tkp1[1] + tkp2[1]) // 2)
-            # d = |kx - y + b| / √ (k² + 1)
-            # 使用numpy的安全除法避免警告
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                p2line_distance = abs(p2d_line_k * mid_tkp[0] - mid_tkp[1] + p2d_line_b) / np.sqrt(p2d_line_k**2 + 1)
+                tkp1 = topk_lines[i][0]
+                tkp2 = topk_lines[i][1]
                 
-            total_distance += p2line_distance + k_rate
+                div = tkp2[0] - tkp1[0]
+                if tkp1[1] - tkp2[1] == 0:
+                    div = 0.1
+                tkp_line_k = (tkp2[1] - tkp1[1]) / div
+
+                max_k = max(p2d_line_k, tkp_line_k)
+                min_k = min(p2d_line_k, tkp_line_k)
+
+                k_rate = max_k / min_k
+
+                mid_tkp = ((tkp1[0] + tkp2[0]) // 2, (tkp1[1] + tkp2[1]) // 2)
+                # d = |kx - y + b| / √ (k² + 1)
+                # 使用numpy的安全除法避免警告
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    p2line_distance = abs(p2d_line_k * mid_tkp[0] - mid_tkp[1] + p2d_line_b) / np.sqrt(p2d_line_k**2 + 1)
+                    
+                total_distance += p2line_distance * 2 + k_rate
+                if printer:
+                    print(f'p2line_distance: {p2line_distance}')
+                    print(f'k_rate: {k_rate}')
+                    print(f'total_distance: {total_distance}')
         return total_distance
 
     bg = np.zeros(
@@ -337,7 +349,7 @@ def calibrate():
         initializer=init_worker,
         initargs=(img, topk_lines)
     ) as pool:
-        print(f'多进程计算初始化: {time.time() - start_time:.2f}s')
+        print(f'多线程计算初始化: {time.time() - start_time:.2f}s')
         results = pool.imap_unordered(worker, camera_pose_list, chunksize=10)
         progress = tqdm.tqdm(results, total=total_poses)
         
@@ -348,8 +360,22 @@ def calibrate():
 
     min_loss = min(loss_list, key=lambda x: x[1])
     print(min_loss)
+    min_loss_visionSolution: VisionSolution = min_loss[0].vision_solution
+    min_p2ds, _ = min_loss_visionSolution.buildPreDistanceMap(camera_img=img)
+
+    for topk_line in topk_lines:
+        cv2.line(img, topk_line[0], topk_line[1], (255, 0, 0), 2)
+
+    for p2d in min_p2ds:
+        cv2.circle(img, (int(p2d[0][0]), int(p2d[0][1])), 2, (0, 255, 0), -1)
+
+    loss_func(topk_lines, min_p2ds, printer=True)
+
+    cv2.namedWindow('test', cv2.WINDOW_NORMAL)
+    cv2.imshow('test', img)
+    cv2.waitKey(0)
 
 
 if __name__ == '__main__':
-    # getTopKLine(debug=False)
+    # getTopKLine(debug=True)
     calibrate()
