@@ -376,6 +376,69 @@ def calibrate():
     cv2.waitKey(0)
 
 
+def find_min_loss(left, right, img, topk_lines, visionSolution_set_func: callable, visionSolution: VisionSolution):    
+    while left < right:
+        mid = (left + right) // 2
+        visionSolution_set_func(mid)
+        res1 = loss_func(topk_lines, visionSolution.buildPreDistanceMap(camera_img=img)[0])
+        visionSolution_set_func(mid + 1)
+        res2 = loss_func(topk_lines, visionSolution.buildPreDistanceMap(camera_img=img)[0])
+        if res1 > res2:
+            left = mid + 1
+        else:
+            right = mid
+    return left
+
+
+def test_binary_calibra():
+    img = cv2.imread('lands/land_cam_2024-01-05 17_36_33.jpg')
+    topk_lines = getTopKLine(debug=False)
+    visionSolution = VisionSolution()
+
+    pitch_range = (48, 49)
+    x_range = (0, 100)
+    y_range = (0, 100)
+    z_range = (0, 100)
+
+    # visionSolution.pitch = 48
+    # visionSolution.camera_y = -1.5 + (50 - 50) / 100
+    # visionSolution.camera_z = -1 + (50 - 50) / 100
+
+    start_time = time.time()
+
+    min_pitch = find_min_loss(
+        pitch_range[0], pitch_range[1], img, topk_lines, visionSolution.human_set_camera_pitch, visionSolution
+    )
+
+    visionSolution.pitch = min_pitch
+    print(min_pitch)
+
+    min_x = find_min_loss(
+        x_range[0], x_range[1], img, topk_lines, visionSolution.human_set_camera_x, visionSolution
+    )
+
+    print(min_x)
+    visionSolution.camera_x = (min_x - 50) / 100
+
+    min_y = find_min_loss(
+        y_range[0], y_range[1], img, topk_lines, visionSolution.human_set_camera_y, visionSolution 
+    )
+
+    print(min_y)
+    visionSolution.camera_y = -1.5 + (min_y - 50) / 100
+
+    min_z = find_min_loss(
+        z_range[0], z_range[1], img, topk_lines, visionSolution.human_set_camera_z, visionSolution
+    )
+
+    print(min_z)
+    visionSolution.camera_z = -1 + (min_z - 50) / 100
+
+    print(f'计算完成: {time.time() - start_time:.2f}s')
+
+
+
 if __name__ == '__main__':
     # getTopKLine(debug=True)
-    calibrate()
+    # calibrate()
+    test_new_calibra()
