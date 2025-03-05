@@ -26,37 +26,80 @@ camera_K = np.array(config['camera_K']['RMX3700_K'], dtype=np.float32)
 
 class VisionSolution:
     def __init__(self) -> None:
-        # self.SCREEN_W = 1280
-        # self.SCREEN_H = 720
-        self.SCREEN_W = 1920
-        self.SCREEN_H = 1080
-        self.camera_x = 0
-        self.camera_y = -0.55
-        self.camera_z = -0.5
-        self.pitch = 20
-        test_cloud = []
-        x = -2
-        while x < 2:
-            z = -0.2
-            while z < 0.2:
-                test_cloud.append([x, 0, z])
-                z += 0.002
-            # z = -0.2
-            x += 0.5
-        self.test_cloud = test_cloud
+        """初始化虚拟相机参数和测试点云"""
+        # 显示参数
+        self.SCREEN_W: int = 1920
+        self.SCREEN_H: int = 1080
+        
+        # 相机参数
+        self.camera_x: float = 0.0
+        self.camera_y: float = -0.55
+        self.camera_z: float = -0.5
+        self.pitch: int = 20
+        
+        # 生成测试点云
+        self.calibra_line_cloud: np.ndarray = self._generate_calibra_line_cloud()
+        self.map_cloud: np.ndarray = self._generate_map_cloud()
 
-        # 地图的点云，单位为m
-        map_cloud = []
-        x = -1.5
-        while x < 1.5:
-            z = -1
-            map_cloud.append([x, 0, z])
-            map_cloud.append([x, 0, z + 2])
-            map_cloud.append([x + 0.01, 0, z + 2])
-            map_cloud.append([x + 0.01, 0, z])
-            # z = -0.2
-            x += 0.01
-        self.map_cloud = map_cloud
+    def _generate_calibra_line_cloud(self) -> np.ndarray:
+        """生成校准用的校准线三维点云阵列
+        Returns:
+            np.ndarray: Nx3形状的校准线点云数组
+        """
+        # 生成x和z的数组
+        x_values = np.arange(-2, 2, 0.5)
+        z_values = np.arange(-0.2, 0.2, 0.002)
+
+        # 重复x的每个元素以匹配z的元素数量，并平铺z以匹配x的元素数量
+        x_repeated = np.repeat(x_values, len(z_values))
+        z_tiled = np.tile(z_values, len(x_values))
+
+        # 创建全零的y列
+        y_zeros = np.zeros_like(x_repeated)
+
+        # 合并列形成最终的二维数组
+        res = np.column_stack((x_repeated, y_zeros, z_tiled))
+        return res
+
+    def _generate_map_cloud(self) -> np.ndarray:
+        """生成地图标定点云
+        Returns:
+            np.ndarray: Nx3形状的地图点云数组
+        """
+        x_values = np.arange(-1.5, 1.5, 0.01)
+        z_values = np.array([-1, 1])  # z轴边界
+        x_repeated = np.repeat(x_values, len(z_values))
+        z_tiled = np.tile(z_values, len(x_values))
+        res = np.column_stack((x_repeated, np.zeros_like(x_repeated), z_tiled))
+        return res
+
+    def human_set_camera_pitch(self, pitch: int):
+        """对操作人暴露的设置相机俯仰角
+        Args:
+            pitch (int): 俯仰角，单位为度
+        """
+        self.pitch = pitch
+
+    def human_set_camera_x(self, x: int):
+        """对操作人暴露的设置相机x轴位置
+        Args:
+            x (float): x轴位置，单位为米
+            """
+        self.camera_x = (x - 50) / 100
+
+    def human_set_camera_y(self, y: int):
+        """对操作人暴露的设置相机y轴位置
+        Args:
+            y (float): y轴位置，单位为米
+        """
+        self.camera_y = - 1.5 + (y - 50) / 100
+
+    def human_set_camera_z(self, z: int):
+        """对操作人暴露的设置相机z轴位置
+        Args:
+            z (float): z轴位置
+        """
+        self.camera_z = - 1 + (z - 50) / 100
 
     def buildPreDistanceMap(self, camera_img):
         """
@@ -65,10 +108,10 @@ class VisionSolution:
         输入：
             camera_img: 相机图像
         输出：
-            points_2d: 映射到屏幕的点云
+            calibra_line_2d: 映射到屏幕的校准线点云
             pre_distance_map: 预映射图
         """
-        test_cloud = np.array(self.test_cloud, dtype=np.float32)
+        calibra_line_cloud = np.array(self.calibra_line_cloud, dtype=np.float32)
         map_cloud = np.array(self.map_cloud, dtype=np.float32)
 
         camera_position = np.array([self.camera_x, self.camera_y, self.camera_z], dtype=np.float32)
@@ -83,15 +126,15 @@ class VisionSolution:
         # 输入的camera_euler_angles为旋转向量
         tvec = R @ camera_position
 
-        points_2d, _ = cv2.projectPoints(
-            test_cloud, camera_euler_angles, tvec, camera_K, None
+        calibra_line_2d, _ = cv2.projectPoints(
+            calibra_line_cloud, camera_euler_angles, tvec, camera_K, None
         )
 
         map_2d, _ = cv2.projectPoints(
             map_cloud, camera_euler_angles, tvec, camera_K, None
         )
 
-        points_2d = np.array(points_2d, dtype=np.int32)
+        calibra_line_2d = np.array(calibra_line_2d, dtype=np.int32)
 
         map_2d = np.array(map_2d, dtype=np.int32)
 
@@ -111,7 +154,7 @@ class VisionSolution:
             # 将该包围的单位距离线条区域填充为包含该距离的色值
             pre_distance_map = cv2.fillConvexPoly(pre_distance_map, np.array(temp_points), color)
 
-        return points_2d, pre_distance_map
+        return calibra_line_2d, pre_distance_map
 
     def get_distance_seg(self, model: YOLO, pre_distance_map: np.ndarray, src_img: np.ndarray):
         """
