@@ -25,7 +25,7 @@ CAMERA_INDEX = config['CAMERA_INDEX']
 camera_K = np.array(config['camera_K']['RMX3700_K'], dtype=np.float32)
 
 class VisionSolution:
-    def __init__(self) -> None:
+    def __init__(self, static_picture=None) -> None:
         """初始化虚拟相机参数和测试点云"""
         # 显示参数
         self.SCREEN_W: int = 1920
@@ -40,6 +40,10 @@ class VisionSolution:
         # 生成测试点云
         self.calibra_line_cloud: np.ndarray = self._generate_calibra_line_cloud()
         self.map_cloud: np.ndarray = self._generate_map_cloud()
+
+        # 固定图片模式
+        self.static_picture: np.ndarray = static_picture
+        self.custom_args: dict = {}
 
     def _generate_calibra_line_cloud(self) -> np.ndarray:
         """生成校准用的校准线三维点云阵列
@@ -101,7 +105,7 @@ class VisionSolution:
         """
         self.camera_z = - 1 + (z - 50) / 100
 
-    def buildPreDistanceMap(self, camera_img):
+    def buildPreDistanceMap(self, camera_img=None):
         """
         将三维点云通过相机内外参的立体视觉计算映射到相机屏幕上，建立预映射图
 
@@ -117,7 +121,14 @@ class VisionSolution:
         camera_position = np.array([self.camera_x, self.camera_y, self.camera_z], dtype=np.float32)
         camera_euler_angles = np.array([radians(self.pitch), radians(0), radians(0)], dtype=np.float32)
         img = np.zeros((self.SCREEN_H, self.SCREEN_W, 3), dtype=np.uint8)
-        pre_distance_map = camera_img.copy()
+
+        if isinstance(camera_img, np.ndarray):
+            pre_distance_map = camera_img.copy()
+        else:
+            if self.static_picture:
+                pre_distance_map = self.static_picture.copy()
+            else:
+                raise ValueError('camera_img is None')
         
         # 计算被旋转后的平移向量
         R, _ = cv2.Rodrigues(camera_euler_angles)
