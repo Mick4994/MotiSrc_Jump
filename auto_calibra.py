@@ -242,7 +242,7 @@ def loss_func(topk_lines, p2ds, debug = False, printer = False, board_size = (19
                     warnings.simplefilter("ignore")
                     p2line_distance = abs(p2d_line_k * mid_tkp[0] - mid_tkp[1] + p2d_line_b) / np.sqrt(p2d_line_k**2 + 1)
                     
-                total_distance += p2line_distance * 2 + k_rate
+                total_distance += p2line_distance + k_rate
                 if printer:
                     print(f'p2line_distance: {p2line_distance}')
                     print(f'k_rate: {k_rate}')
@@ -387,7 +387,7 @@ def test_binary_calibra():
     topk_lines = getTopKLine(debug=False)
     visionSolution = VisionSolution()
 
-    pitch_range = (48, 49)
+    pitch_range = (40, 60)
     x_range = (0, 100)
     y_range = (0, 100)
     z_range = (0, 100)
@@ -426,8 +426,74 @@ def test_binary_calibra():
     print(f'计算完成: {time.time() - start_time:.2f}s')
 
 
+def coordinate_descent(init_combine, ranges, img, topk_lines, visionSolution: VisionSolution):
+    current_vars = init_combine
+    visionSolution.pitch = current_vars[0]
+    visionSolution.camera_x = current_vars[1]
+    visionSolution.camera_y = current_vars[2]
+    visionSolution.camera_z = current_vars[3]
+    current_error = loss_func(topk_lines, visionSolution.buildPreDistanceMap(camera_img=img)[0])
+    improved = True
+
+    while improved:
+        improved = False
+        for i in range(4):  # 依次优化每个变量
+            best_val = current_vars[i]
+            best_error = current_error
+            # 遍历当前变量的所有可能值（0-100）
+            for val in range(ranges[i][0], ranges[i][1]):
+                test_vars = current_vars.copy()
+                test_vars[i] = val
+                visionSolution.human_set_camera_pitch(test_vars[0])
+                visionSolution.human_set_camera_x(test_vars[1])
+                visionSolution.human_set_camera_y(test_vars[2])
+                visionSolution.human_set_camera_z(test_vars[3])
+                test_error = loss_func(topk_lines, visionSolution.buildPreDistanceMap(camera_img=img)[0])
+                if test_error < best_error:
+                    best_error = test_error
+                    best_val = val
+            # 更新变量和误差
+            if best_val != current_vars[i]:
+                current_vars[i] = best_val
+                current_error = best_error
+                improved = True
+
+    return current_vars, current_error
+
+def test_coordinate_descent():
+    img = cv2.imread('lands/land_cam_2024-01-05 17_36_33.jpg')
+    topk_lines = getTopKLine(debug=False)
+    visionSolution = VisionSolution()
+
+    poses_ranges = [
+        (40, 60),
+        (40, 60),
+        (30, 70),
+        (40, 60) 
+    ]
+    min_loss_vars, loss = coordinate_descent([50, 50, 50, 50], poses_ranges, img, topk_lines, visionSolution)
+    print(min_loss_vars, loss)
+    visionSolution.human_set_camera_pitch(min_loss_vars[0])
+    visionSolution.human_set_camera_x(min_loss_vars[1])
+    visionSolution.human_set_camera_y(min_loss_vars[2])
+    visionSolution.human_set_camera_z(min_loss_vars[3])
+    min_p2ds, _ = visionSolution.buildPreDistanceMap(camera_img=img)
+
+    for topk_line in topk_lines:
+        cv2.line(img, topk_line[0], topk_line[1], (255, 0, 0), 2)
+
+    for p2d in min_p2ds:
+        cv2.circle(img, (int(p2d[0][0]), int(p2d[0][1])), 2, (0, 255, 0), -1)
+
+    loss_func(topk_lines, min_p2ds, printer=True)
+
+    cv2.namedWindow('test', cv2.WINDOW_NORMAL)
+    cv2.imshow('test', img)
+    cv2.waitKey(0)
+
 
 if __name__ == '__main__':
     # getTopKLine(debug=True)
     # calibrate()
-    test_binary_calibra()
+    # test_binary_calibra()
+    test_coordinate_descent()
