@@ -275,19 +275,11 @@ class CameraPose(NamedTuple):
     camera_x: int
     camera_y: int
     camera_z: int
+    img: np.ndarray
+    topk_lines: list
     vision_solution: VisionSolution
-
-
-# 在模块顶部添加全局声明
-_global_img = None
-_global_topk_lines = None
-
-
-def init_worker(img, topk_lines):
-    """多进程初始化函数"""
-    global _global_img, _global_topk_lines
-    _global_img = img
-    _global_topk_lines = topk_lines
+    def __str__(self):
+        return f'[pitch: {self.pitch}, camera_x: {self.camera_x}, camera_y: {self.camera_y}, camera_z: {self.camera_z}]'
 
 
 def worker(camera_pose: CameraPose):
@@ -297,9 +289,9 @@ def worker(camera_pose: CameraPose):
     copy_visionSolution.camera_y = - 1.5 + (camera_pose.camera_y - 50) / 100
     copy_visionSolution.camera_z = - 1 + (camera_pose.camera_z - 50) / 100
 
-    p2ds, _ = copy_visionSolution.buildPreDistanceMap(camera_img=_global_img)
+    p2ds, _ = copy_visionSolution.buildPreDistanceMap(camera_img=camera_pose.img)
     
-    loss = loss_func(_global_topk_lines, p2ds, debug=False)
+    loss = loss_func(camera_pose.topk_lines, p2ds, debug=False)
     if math.isnan(loss):
         return None
 
@@ -333,7 +325,7 @@ def calibrate():
 
     # 使用itertools.product生成所有组合
     camera_pose_list = (
-        CameraPose(pitch, camera_x, camera_y, camera_z, copy.deepcopy(visionSolution)) 
+        CameraPose(pitch, camera_x, camera_y, camera_z, img, topk_lines, copy.deepcopy(visionSolution)) 
         for pitch, camera_x, camera_y, camera_z in itertools.product(
         pitch_range, camera_x_range, camera_y_range, camera_z_range)
     )
@@ -345,9 +337,7 @@ def calibrate():
     start_time = time.time()
 
     with multiprocessing.Pool(
-        processes=os.cpu_count(),
-        initializer=init_worker,
-        initargs=(img, topk_lines)
+        processes=os.cpu_count()
     ) as pool:
         print(f'多线程计算初始化: {time.time() - start_time:.2f}s')
         results = pool.imap_unordered(worker, camera_pose_list, chunksize=10)
@@ -359,7 +349,7 @@ def calibrate():
                 loss_list.append(result)
 
     min_loss = min(loss_list, key=lambda x: x[1])
-    print(min_loss)
+    print(f'{min_loss[0]} loss=>{min_loss[1]}')
     min_loss_visionSolution: VisionSolution = min_loss[0].vision_solution
     min_p2ds, _ = min_loss_visionSolution.buildPreDistanceMap(camera_img=img)
 
