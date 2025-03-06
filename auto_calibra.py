@@ -400,9 +400,6 @@ def test_binary_calibra():
     y_range = (0, 100)
     z_range = (0, 100)
 
-    # visionSolution.pitch = 48
-    # visionSolution.camera_y = -1.5 + (50 - 50) / 100
-    # visionSolution.camera_z = -1 + (50 - 50) / 100
 
     start_time = time.time()
 
@@ -441,4 +438,4 @@ def test_binary_calibra():
 if __name__ == '__main__':
     # getTopKLine(debug=True)
     # calibrate()
-    test_new_calibra()
+    test_binary_calibra()
