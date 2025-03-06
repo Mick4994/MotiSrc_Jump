@@ -205,7 +205,7 @@ def loss_func(topk_lines, p2ds, debug = False, printer = False, board_size = (19
 
     # 反转+裁剪
     p2ds = p2ds[::-1]
-    p2ds = p2ds[400: 400+200*3]
+    p2ds = p2ds[600: 600+300*3]
 
     if not debug:
         total_distance = 0
@@ -215,8 +215,8 @@ def loss_func(topk_lines, p2ds, debug = False, printer = False, board_size = (19
 
         with np.errstate(divide='ignore', invalid='ignore'):
             for i in range(3):
-                p2d1:np.ndarray = p2ds[i*200][0]
-                p2d2:np.ndarray = p2ds[i*200+199][0]
+                p2d1:np.ndarray = p2ds[i*300][0]
+                p2d2:np.ndarray = p2ds[i*300+299][0]
                 p2d_list.append([p2d1.tolist(), p2d2.tolist()])
                 # y = kx + b
                 p2d_line_k = (p2d2[1] - p2d1[1]) / (p2d2[0] - p2d1[0])
@@ -310,7 +310,7 @@ def calibrate():
     start_time = time.time()
 
     # 使用numpy生成参数范围
-    pitch_range = np.arange(48, 49)
+    pitch_range = np.arange(40, 60)
     camera_x_range = np.arange(45, 55)
     camera_y_range = np.arange(55, 75)
     camera_z_range = np.arange(45, 55)
@@ -343,14 +343,16 @@ def calibrate():
         results = pool.imap_unordered(worker, camera_pose_list, chunksize=10)
         progress = tqdm.tqdm(results, total=total_poses)
         
-        loss_list = []
+        min_loss = 9999
+        min_loss_poses = []
         for result in progress:
-            if result is not None:
-                loss_list.append(result)
+            if result is not None and result[1] < min_loss:
+                min_loss = result[1]
+                min_loss_poses = result[0]
+                del result
 
-    min_loss = min(loss_list, key=lambda x: x[1])
-    print(f'{min_loss[0]} loss=>{min_loss[1]}')
-    min_loss_visionSolution: VisionSolution = min_loss[0].vision_solution
+    print(f'{min_loss_poses} loss=>{min_loss}')
+    min_loss_visionSolution: VisionSolution = min_loss_poses.vision_solution
     min_p2ds, _ = min_loss_visionSolution.buildPreDistanceMap(camera_img=img)
 
     for topk_line in topk_lines:
