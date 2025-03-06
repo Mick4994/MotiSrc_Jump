@@ -52,7 +52,7 @@ class VisionSolution:
         """
         # 生成x和z的数组
         x_values = np.arange(-2, 2, 0.5)
-        z_values = np.arange(-0.2, 0.2, 0.002)
+        z_values = np.arange(-0.3, 0.3, 0.002)
 
         # 重复x的每个元素以匹配z的元素数量，并平铺z以匹配x的元素数量
         x_repeated = np.repeat(x_values, len(z_values))
