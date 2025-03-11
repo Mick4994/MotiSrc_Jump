@@ -204,16 +204,20 @@ def main2(debug=False):
 
         # 这里流程复杂，需要补流程图 
 
+        # 如果在之前下面的流程中，没有复杂的计算，例如检测到起跳等，lidar.tick还未到达下一帧，直接跳过，避免重复雷达帧运算
         if tick == lidar.tick:
             continue
-
+        
+        # 赋值为当前帧
         tick = lidar.tick
 
+        # 已经落地过，全流程走完，不必再检测，跳过
         if is_land:
             continue
 
         # 检测到有落点，获取距离，完成一次跳远流程
         if lidar.out_img.any():
+            # 0.2是个经验值，可能需要根据实际运行速度/相机帧率调整
             time.sleep(0.2)
             _, tick_img = cap.read()
             print(f'distance: {visionSolution.get_distance_seg(model, pre_distance_map, tick_img)}')
@@ -224,12 +228,15 @@ def main2(debug=False):
             cv2.imwrite(f'lands/land_cam_{rq}.jpg', tick_img)
             is_land = True
 
+        # 代表检测过是在起跳准备阶段，直接跳过
         if is_jump:
             continue
 
+        # 如果起跳区域没有雷达点云检出，并且之前不是已经检测到进入起跳区，则认为未开始进入起跳准备
         if not lidar.jump_img.any() and not is_stand:
             continue
 
+        # 起跳区有雷达点云检出，则认为进入起跳准备
         is_stand = True
 
         # 起跳区没有雷达点云检出，则认为起跳

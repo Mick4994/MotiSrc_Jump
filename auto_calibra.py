@@ -62,9 +62,7 @@ def on_mouse_move(event, x, y, flags, param):
     cv2.imshow('test', marked_img)
 
 
-def getTopKLine(top_k = 3, debug = False, show_line=True):
-
-    img = cv2.imread('lands/land_cam_2024-01-05 17_36_33.jpg')
+def getTopKLine(img, top_k = 3, debug = False, show_line=True):
 
     hsv_img = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
@@ -302,7 +300,7 @@ def calibrate():
     start_time = time.time()
 
     img = cv2.imread('lands/land_cam_2024-01-05 17_36_33.jpg')
-    topk_lines = getTopKLine(debug=False)
+    topk_lines = getTopKLine(img, debug=False)
     visionSolution = VisionSolution()
 
     print(f'加载图片topk校准线和虚拟相机: {time.time() - start_time:.2f}s')
@@ -404,7 +402,7 @@ def coordinate_descent(init_combine, ranges, img, topk_lines, visionSolution: Vi
 
 def test_coordinate_descent():
     img = cv2.imread('lands/land_cam_2024-01-05 17_36_33.jpg')
-    topk_lines = getTopKLine(debug=False)
+    topk_lines = getTopKLine(img, debug=False)
     visionSolution = VisionSolution()
 
     poses_ranges = [
@@ -435,7 +433,8 @@ def test_coordinate_descent():
 
 
 if __name__ == '__main__':
-    # getTopKLine(debug=True)
+    # img = cv2.imread('lands/land_cam_2024-01-05 17_36_33.jpg')
+    # getTopKLine(img, debug=True)
     # calibrate()
     # test_binary_calibra()
     test_coordinate_descent()
