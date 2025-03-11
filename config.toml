@@ -8,7 +8,10 @@ init_y = 68
 init_z = 39
 init_p = 48
 
+# 裁剪脚部区域的高度(经验值)
 cut_bound = 100
+
+# 相机的索引
 CAMERA_INDEX = 0
 
 [camera_K]

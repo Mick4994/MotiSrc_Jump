@@ -169,47 +169,53 @@ class VisionSolution:
             distance: 距离，单位为m
         """
         result = model(src_img)
-        # print(src_img)
+
         np_mask = result[0].masks[0].cpu().data.numpy() * 255
         img_mask = np_mask[0]
         img_mask = cv2.resize(img_mask, (self.SCREEN_W, self.SCREEN_H))
-        rq = time.strftime('%Y-%m-%d %H_%M_%S', time.localtime(time.time()))
-        # print(img_mask.sh)
+
+        # 时间戳
+        timestamp = time.strftime('%Y-%m-%d %H_%M_%S', time.localtime(time.time()))
 
         up_bound = 0
-        distance = 0
-        x, y = 0, 0
         img_y_len = len(img_mask)
 
-        # 遍历出脚后跟图像坐标点，从下往上遍历，找到第一个有像素的点，然后向上遍历，找到第一个有像素的点，
-        # 然后将该点的颜色值取出，转换为距离，返回
-        for i in range(img_y_len):
-            index = len(img_mask) - 1 - i
-            if img_mask[index].any():
-                if index - cut_bound > 0:
-                    up_bound = index - cut_bound
-                cut_mask = img_mask[up_bound:index]
+        # 1. 遍历出脚后跟图像坐标点，从下往上遍历，找到第一个有像素的点，然后按照经验值裁出脚部区域
+        # 2. 然后从左向右遍历，找到第一个有像素的点，为脚后跟图像坐标点
+        # 3. 然后将该点的颜色值取出，转换为距离，返回
 
-                T_cut_mask = cut_mask.T
-                for k in range(len(T_cut_mask)):
-                    if T_cut_mask[k].any():
-                        x = k
-                        for s in range(len(T_cut_mask[k])):
-                            if not T_cut_mask[k][s].any():
-                                y = index - (cut_bound - 1 - s)
-                                # print(s, img_mask.shape, T_cut_mask.shape)
+        # 求出脚部区域上下边界
+        for ny, row in enumerate(img_mask[::-1]):
+            y = img_y_len - 1 - ny
+            # cut_bound: 裁剪脚部区域的高度(经验值)，暂为100
+            if row.any() and y > cut_bound:
+                up_bound = y - cut_bound
+                cut_mask = img_mask[up_bound:y]
+                break
+        else:
+            raise ValueError('No foot area found')
 
-                                color = pre_distance_map[y][x]
-                                # print(color)
-                                distance = (color[0] + color[1]) / 100
-                                img_mask = cv2.cvtColor(img_mask, cv2.COLOR_GRAY2BGR)
-                                cv2.circle(img_mask, (x, y), 3, (0, 255, 0), 1)
-                                cv2.imwrite(f'lands/img_mask_{rq}.jpg', img_mask)
-                                return distance
+        # 转置图像以便按列遍历
+        T_cut_mask = cut_mask.T
 
-                        break
+        # 求出脚部区域碰到脚后跟的x坐标
+        for x, col in enumerate(T_cut_mask):
+            if col.any():
+                x0 = x
+                break
+        else:
+            raise ValueError('Cut foot area error')
 
+        # 求出脚部区域碰到脚后跟的y坐标
+        for y, col in enumerate(T_cut_mask[x0]):
+            if not col.any():
+                y0 = up_bound + y - 1
+                break
+
+        # 从预映射图获取距离
+        color = pre_distance_map[y0][x0]
+        distance = (color[0] + color[1]) / 100
         img_mask = cv2.cvtColor(img_mask, cv2.COLOR_GRAY2BGR)
-        cv2.circle(img_mask, (x, y), 3, (0, 255, 0), 1)
-        cv2.imwrite(f'lands/img_mask_{rq}.jpg', img_mask)
+        cv2.circle(img_mask, (x0, y0), 3, (0, 255, 0), 1)
+        cv2.imwrite(f'lands/img_mask_{timestamp}.jpg', img_mask)
         return distance
