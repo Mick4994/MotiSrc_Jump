@@ -9,7 +9,7 @@ import itertools
 import numpy as np
 import multiprocessing
 from typing import NamedTuple
-from mix import VisionSolution
+from CameraVision import VisionSolution
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 
