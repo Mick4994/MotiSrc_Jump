@@ -1,11 +1,13 @@
 import cv2
 import time
 import toml
+import math
 import threading
 import numpy as np
 from ultralytics import YOLO
 from CameraVision import VisionSolution
 from Lidar import Lidar
+from auto_calibra import getTopKLine, coordinate_descent
 
 
 # 读取 TOML 配置文件
@@ -48,16 +50,18 @@ def com_lidar(use_lidar: bool = True, debug: bool = False):
         cv2.namedWindow('stand', cv2.WINDOW_NORMAL)
         cv2.namedWindow('land', cv2.WINDOW_NORMAL)
         cv2.namedWindow('all_img', cv2.WINDOW_NORMAL)
-    cv2.createTrackbar('x', 'camera', 53, 100, lambda x: None)
-    cv2.createTrackbar('y', 'camera', 49, 100, lambda x: None)
-    cv2.createTrackbar('z', 'camera', 13, 100, lambda x: None)
-    cv2.createTrackbar('p', 'camera', 43, 90, lambda x: None)
+    cv2.createTrackbar('x', 'camera', 50, 100, lambda x: None)
+    cv2.createTrackbar('y', 'camera', 50, 100, lambda x: None)
+    cv2.createTrackbar('z', 'camera', 50, 100, lambda x: None)
+    cv2.createTrackbar('p', 'camera', 50, 90, lambda x: None)
 
     while True:
         if debug:
             img = src.copy()
         else:
             _, img = cap.read()
+
+        img_src = img.copy()
 
         camera_x = cv2.getTrackbarPos('x', 'camera')
         visionSolution.camera_x = (camera_x - 50) / 100
@@ -88,8 +92,31 @@ def com_lidar(use_lidar: bool = True, debug: bool = False):
                 cv2.imshow('all_img', lidar.all_img)
             except:
                 pass
+        
+        key = cv2.waitKey(1)
 
-        if cv2.waitKey(1) == ord('b'):
+        if key == ord('c'):
+            print('start auto calibrate!')
+            
+            poses_ranges = [
+                (40, 60),
+                (40, 60),
+                (30, 70),
+                (40, 60) 
+            ]
+            topk_lines = getTopKLine(img=img_src)
+            min_loss_vars, loss = coordinate_descent([pitch, camera_x, camera_y, camera_z], poses_ranges, img_src, topk_lines, visionSolution)
+            cv2.setTrackbarPos('p', 'camera', min_loss_vars[0])
+            cv2.setTrackbarPos('x', 'camera', min_loss_vars[1])
+            cv2.setTrackbarPos('y', 'camera', min_loss_vars[2])
+            cv2.setTrackbarPos('z', 'camera', min_loss_vars[3])
+
+            if math.isnan(loss):
+                print('calibrate failed!')
+            else:
+                print(f'calibrate success! result: {min_loss_vars}, loss: {loss}')
+
+        elif key == ord('b'):
             cv2.destroyAllWindows()
             break
 
@@ -150,6 +177,9 @@ def main2(debug=False):
             img = src.copy()
         else:
             _, img = cap.read()
+
+        img_src = img.copy()
+
         camera_x = cv2.getTrackbarPos('x', 'camera')
         visionSolution.camera_x = (camera_x - 50) / 100
         camera_y = cv2.getTrackbarPos('y', 'camera')
@@ -194,11 +224,33 @@ def main2(debug=False):
                 print('stop recording!')
                 is_start = False
 
-        if key == ord('s'):
+        if key == ord('c'):
+            print('start auto calibrate!')
+            # 自动校准
+
+            poses_ranges = [
+                (40, 60),
+                (40, 60),
+                (30, 70),
+                (40, 60) 
+            ]
+            topk_lines = getTopKLine(img=img_src)
+            min_loss_vars, loss = coordinate_descent([pitch, camera_x, camera_y, camera_z], poses_ranges, img_src, topk_lines, visionSolution)
+            cv2.setTrackbarPos('p', 'camera', min_loss_vars[0])
+            cv2.setTrackbarPos('x', 'camera', min_loss_vars[1])
+            cv2.setTrackbarPos('y', 'camera', min_loss_vars[2])
+            cv2.setTrackbarPos('z', 'camera', min_loss_vars[3])
+
+            if math.isnan(loss):
+                print('calibrate failed!')
+            else:
+                print(f'calibrate success! result: {min_loss_vars}, loss: {loss}')
+
+        elif key == ord('s'):
             print('save recording!')
             # out.release()
 
-        if key == ord('b'):
+        elif key == ord('b'):
             cv2.destroyAllWindows()
             break
 
