@@ -24,9 +24,9 @@ init_p = config['init_p']
 CAMERA_INDEX = config['CAMERA_INDEX']
 
 
-def com_lidar(use_lidar: bool = True, debug: bool = False):
+def demo(use_lidar: bool = True, debug: bool = False):
     """
-    校准窗口滑块调整虚拟相机位置，使虚拟相机校准线 对齐 真实相机画面中现实跳远刻度线
+    单纯效果演示，预映射投影图的点云展示，同步跟随滑块调整的虚拟相机位姿，自动校准效果展示
     """
     if use_lidar:
         lidar = Lidar(com="COM43")
@@ -123,9 +123,9 @@ def com_lidar(use_lidar: bool = True, debug: bool = False):
     if not debug:
         cap.release()
 
-def main2(debug=False):
+def entire_process(debug=False):
     """
-    主函数，完成一次跳远的流程控制
+    全流程，完成一次立定跳远的逻辑控制流程，即包含所有算法效果实现和立定跳远流程的逻辑
     """
     lidar = Lidar(com="COM4")
     lidar_thread = threading.Thread(target=lidar.readlidar2img, daemon=True)
@@ -305,7 +305,5 @@ def main2(debug=False):
 
 
 if __name__ == "__main__":
-    # main2()
-    # main2(debug=True)
-    com_lidar(use_lidar=False, debug=True)
+    demo(use_lidar=False, debug=True)
 
